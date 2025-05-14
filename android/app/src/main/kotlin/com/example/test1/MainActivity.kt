@@ -83,7 +83,7 @@ import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodChannel
 
-class MainActivity: FlutterActivity() {
+class MainActivity : FlutterActivity() {
     private val CHANNEL = "visualizer"
     private var visualizer: Visualizer? = null
     private val TAG = "VisualizerMainActivity"
@@ -93,14 +93,20 @@ class MainActivity: FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "initVisualizer" -> {
-                    initVisualizer()
-                    Log.d(TAG, "Visualizer initialized")
-                    result.success(null)
+                    val audioSessionId = call.argument<Int>("audioSessionId")
+                    try {
+                        initVisualizer(audioSessionId)
+                        Log.d(TAG, "Visualizer initialized with audioSessionId: $audioSessionId")
+                        result.success(null)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Visualizer init error", e)
+                        result.error("VISUALIZER_INIT_ERROR", "Failed to initialize visualizer", e.message)
+                    }
                 }
                 "getWaveform" -> {
                     val waveform = getWaveform()
                     if (waveform != null) {
-                        Log.d(TAG, "Waveform data: ${waveform.size} bytes")
+                        Log.d(TAG, "Waveform data: ${waveform.size} bytes, values: ${waveform.toList()}")
                         result.success(waveform.toList())
                     } else {
                         Log.e(TAG, "Failed to get waveform")
@@ -122,15 +128,12 @@ class MainActivity: FlutterActivity() {
         }
     }
 
-    private fun initVisualizer() {
+    private fun initVisualizer(audioSessionId: Int?) {
         try {
-            // آزاد کردن Visualizer قبلی اگر وجود داشته باشد
             visualizer?.release()
             visualizer = null
-
-            // مقداردهی اولیه Visualizer جدید
-            visualizer = Visualizer(0).apply {
-                captureSize = Visualizer.getCaptureSizeRange()[1] // استفاده از حداکثر اندازه ممکن
+            visualizer = Visualizer(audioSessionId ?: 0).apply {
+                captureSize = Visualizer.getCaptureSizeRange()[1]
                 measurementMode = Visualizer.MEASUREMENT_MODE_PEAK_RMS
                 enabled = true
             }
@@ -138,15 +141,14 @@ class MainActivity: FlutterActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "Visualizer init error", e)
             visualizer = null
-            // در صورت خطا، نتیجه خطا را به Flutter برگردانید
-            // (اختیاری، بسته به نیاز)
+            throw e // Let the caller handle the error
         }
     }
 
     private fun getWaveform(): ByteArray? {
         if (visualizer == null) {
-            Log.w(TAG, "Visualizer is null, initializing...")
-            initVisualizer()
+            Log.w(TAG, "Visualizer is null")
+            return null
         }
 
         return try {

@@ -13,6 +13,7 @@ class RadioController extends GetxController {
   var bars = List<double>.filled(30, 0.0).obs;
   static const platform = MethodChannel('visualizer');
   Timer? _timer;
+  bool _visualizerInitialized = false;
 
   void debugPrintBars() {
     ever(bars, (value) => debugPrint('Bars updated: $value'));
@@ -21,7 +22,7 @@ class RadioController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    debugPrintBars(); // برای دیباگ
+    debugPrintBars();
     initAudioSession();
   }
 
@@ -38,9 +39,9 @@ class RadioController extends GetxController {
 
   void _handlePlaybackEvent(PlaybackEvent event) {
     isPlaying.value = _player.playing;
-    if (_player.playing) {
+    if (_player.playing && !_visualizerInitialized) {
       _startVisualizer();
-    } else {
+    } else if (!_player.playing) {
       _stopVisualizer();
     }
   }
@@ -66,7 +67,6 @@ class RadioController extends GetxController {
 
       await _player.setUrl(url);
       await _player.play();
-      _startVisualizer();
     } catch (e) {
       Get.snackbar('Error', 'Failed to play radio: $e');
     }
@@ -81,47 +81,61 @@ class RadioController extends GetxController {
     }
   }
 
-  void _startVisualizer() {
+  Future<void> _startVisualizer() async {
+    if (_visualizerInitialized) {
+      debugPrint('Visualizer already initialized, skipping...');
+      return;
+    }
+
     _timer?.cancel();
     debugPrint('Starting visualizer...');
     try {
-      platform.invokeMethod('initVisualizer').then((_) {
-        debugPrint('Visualizer initialized');
-        _timer = Timer.periodic(const Duration(milliseconds: 60), (timer) async {
-          if (!isPlaying.value) {
-            debugPrint('Stopping visualizer due to pause');
-            timer.cancel();
+      int? audioSessionId = await _player.androidAudioSessionId;
+      await platform.invokeMethod('initVisualizer', {'audioSessionId': audioSessionId});
+      debugPrint('Visualizer initialized with audioSessionId: $audioSessionId');
+      _visualizerInitialized = true;
+
+      _timer = Timer.periodic(const Duration(milliseconds: 200), (timer) async {
+        if (!isPlaying.value) {
+          debugPrint('Stopping visualizer due to pause');
+          timer.cancel();
+          return;
+        }
+        try {
+          final waveform = await platform.invokeMethod('getWaveform');
+          if (waveform == null || waveform is! List) {
+            debugPrint('Invalid waveform data received');
+            bars.value = List.filled(30, 0.0);
             return;
           }
-          try {
-            final waveform = await platform.invokeMethod('getWaveform');
-            if (waveform != null && waveform is List) {
-              debugPrint('Waveform received: ${waveform.length} samples');
-              final List<int> data = List<int>.from(waveform);
-              bars.value = _processWaveform(data);
-            } else {
-              debugPrint('No waveform data received');
-            }
-          } catch (e) {
-            debugPrint('Error getting waveform: $e');
-            if (isPlaying.value) {
-              _startVisualizer();
-            }
-          }
-        });
+          debugPrint('Waveform received: ${waveform.length} samples');
+          final List<int> data = List<int>.from(waveform);
+          bars.value = _processWaveform(data);
+        } catch (e) {
+          debugPrint('Error getting waveform: $e');
+          bars.value = List.filled(30, 0.0);
+        }
       });
     } catch (e) {
       debugPrint('Error initializing visualizer: $e');
+      _visualizerInitialized = false;
     }
   }
 
   List<double> _processWaveform(List<int> waveform) {
-    if (waveform.isEmpty) return List.filled(30, 0.0);
+    // Check for invalid waveform data (all -128, 128, or 0)
+    if (waveform.isEmpty ||
+        waveform.every((val) => val == 0) ||
+        waveform.every((val) => val == 128) ||
+        waveform.every((val) => val == -128)) {
+      debugPrint('Invalid waveform data detected: all values are uniform');
+      return List.filled(30, 0.0);
+    }
 
-    int samplesPerBar = (1024 / 30).round();
+    int samplesPerBar = (waveform.length / 30).round();
     List<double> result = List.filled(30, 0.0);
 
-    // محاسبه مقدار ماکزیمم
+    // Calculate maximum absolute value
     int globalMax = waveform.fold(
       0,
           (max, value) => value.abs() > max ? value.abs() : max,
@@ -141,17 +155,18 @@ class RadioController extends GetxController {
         count++;
       }
 
-      result[i] = (count > 0) ? (sum / count) : 0.0;
+      result[i] = count > 0 ? (sum / count) : 0.0;
     }
 
-    // اعمال تقویت و محدود کردن مقادیر
-    result = result.map((val) => pow(val, 3.0).toDouble().clamp(0.0, 1.0)).toList();
+    // Apply smoother amplification
+    result = result.map((val) => pow(val, 2.0).toDouble().clamp(0.0, 1.0)).toList();
 
     return result;
   }
 
   void _stopVisualizer() {
     _timer?.cancel();
+    _visualizerInitialized = false;
     bars.value = List.filled(30, 0.0);
     try {
       platform.invokeMethod('stopVisualizer');

@@ -1,5 +1,4 @@
 import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../controllers/radio_controller.dart';
@@ -7,13 +6,13 @@ import '../controllers/radio_controller.dart';
 class EqualizerVisualizer extends StatelessWidget {
   final double height;
   final Color barColor;
-  final double sensitivity; // حساسیت به تغییرات (۱ تا ۱۰)
+  final double sensitivity;
 
   const EqualizerVisualizer({
     Key? key,
     this.height = 120,
     this.barColor = Colors.blueAccent,
-    this.sensitivity = 3.0,
+    this.sensitivity = 1.5,
   }) : super(key: key);
 
   @override
@@ -24,7 +23,6 @@ class EqualizerVisualizer extends StatelessWidget {
       height: height,
       child: Obx(() {
         final bars = controller.bars.map((val) {
-          // اعمال حساسیت به تغییرات
           double adjusted = pow(val, sensitivity).toDouble();
           return adjusted.clamp(0.0, 1.0);
         }).toList();
@@ -45,13 +43,13 @@ class _EqualizerPainter extends CustomPainter {
   final List<double> bars;
   final Color barColor;
   final double spacing;
-  final double minHeight; // حداقل ارتفاع برای نمایش
+  final double minHeight;
 
   _EqualizerPainter({
     required this.bars,
     required this.barColor,
     this.spacing = 2.0,
-    this.minHeight = 0.05, // 5% حداقل ارتفاع
+    this.minHeight = 0.05,
   });
 
   @override
@@ -63,7 +61,6 @@ class _EqualizerPainter extends CustomPainter {
     final barWidth = size.width / bars.length;
 
     for (int i = 0; i < bars.length; i++) {
-      // ترکیب مقدار با حداقل ارتفاع
       double height = (minHeight + (bars[i] * (1.0 - minHeight))) * size.height;
       height = height.clamp(size.height * minHeight * 1.8, size.height);
 
